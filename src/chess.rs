@@ -258,11 +258,11 @@ impl Board {
       .squares
       .iter_mut()
       .for_each(|square| square.highlighted = false);
+
     let square = &mut self.squares[square_index];
     if let Some(piece) = square.piece
       && piece.color == self.turn_color
     {
-      // self.select_piece(piece);
       square.highlighted = true;
     }
   }
