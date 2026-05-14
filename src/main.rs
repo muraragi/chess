@@ -27,19 +27,8 @@ async fn main() -> Result<(), Error> {
     clear_background(Color::from_hex(0x303134));
 
     for (i, square) in board.squares.iter().enumerate() {
-      square.render(i as i32);
+      square.render(i as i32, &resources);
     }
-
-    draw_texture_ex(
-      &resources.b_bishop,
-      (screen_width() / 2.0) - 95.0,
-      screen_height() / 2.0 + 10.0,
-      WHITE,
-      DrawTextureParams {
-        dest_size: Some(vec2(88.0, 88.0)),
-        ..Default::default()
-      },
-    );
 
     if is_key_down(KeyCode::Escape) {
       std::process::exit(0);

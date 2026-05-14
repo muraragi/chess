@@ -2,6 +2,8 @@ use std::array::from_fn;
 
 use macroquad::prelude::*;
 
+use crate::resources::Resources;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum File {
   A,
@@ -71,6 +73,8 @@ struct Piece {
   value: i32,
 }
 
+const PIECE_SPRITE_SIZE: f32 = 80.0;
+
 impl Piece {
   pub fn new(color: PieceColor, kind: PieceKind) -> Self {
     let value = match kind {
@@ -109,11 +113,52 @@ impl Piece {
       _ => None,
     }
   }
+
+  pub fn render(&self, square_pos: Vec2, resources: &Resources) {
+    let pick_piece_color = |b, w| {
+      if self.color == PieceColor::Black {
+        b
+      } else {
+        w
+      }
+    };
+
+    let sprite = match &self.kind {
+      PieceKind::King => pick_piece_color(&resources.b_king, &resources.w_king),
+      PieceKind::Queen => pick_piece_color(&resources.b_queen, &resources.w_queen),
+      PieceKind::Bishop => pick_piece_color(&resources.b_bishop, &resources.w_bishop),
+      PieceKind::Rook => pick_piece_color(&resources.b_rook, &resources.w_rook),
+      PieceKind::Knight => pick_piece_color(&resources.b_knight, &resources.w_knight),
+      PieceKind::Pawn => pick_piece_color(&resources.b_pawn, &resources.w_pawn),
+    };
+
+    let aspect = sprite.width() / sprite.height();
+    let h = PIECE_SPRITE_SIZE;
+    let offset = (SQUARE_SIZE - PIECE_SPRITE_SIZE) / 2.0;
+
+    let offset_x_error = match &self.kind {
+      PieceKind::Pawn => 8.0,
+      PieceKind::King => 2.0,
+      PieceKind::Queen => -2.0,
+      _ => 0.0,
+    };
+
+    draw_texture_ex(
+      sprite,
+      square_pos.x + offset + offset_x_error,
+      square_pos.y + offset,
+      WHITE,
+      DrawTextureParams {
+        dest_size: Some(vec2(h * aspect, h)),
+        ..Default::default()
+      },
+    );
+  }
 }
 
 const WHITE_SQUARE_COLOR: Color = Color::from_hex(0x7C4C3E);
 const DARK_SQUARE_COLOR: Color = Color::from_hex(0x512A2A);
-const SQUARE_SIZE: f32 = 104.0;
+const SQUARE_SIZE: f32 = 100.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Square {
@@ -123,7 +168,7 @@ pub struct Square {
 }
 
 impl Square {
-  pub fn render(&self, i: i32) {
+  pub fn render(&self, i: i32, resources: &Resources) {
     let col = i % 8;
     let row = i / 8;
 
@@ -136,13 +181,15 @@ impl Square {
     let offset_x = (screen_width() - 8.0 * SQUARE_SIZE) / 2.0;
     let offset_y = (screen_height() - 8.0 * SQUARE_SIZE) / 2.0;
 
-    draw_rectangle(
+    let square_pos = vec2(
       offset_x + col as f32 * SQUARE_SIZE,
       offset_y + row as f32 * SQUARE_SIZE,
-      SQUARE_SIZE,
-      SQUARE_SIZE,
-      color,
     );
+
+    draw_rectangle(square_pos.x, square_pos.y, SQUARE_SIZE, SQUARE_SIZE, color);
+    if let Some(piece) = &self.piece {
+      piece.render(square_pos, resources);
+    }
   }
 }
 
