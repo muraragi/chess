@@ -66,6 +66,13 @@ const RANKS: [Rank; 8] = [
   Rank::Eight,
 ];
 
+fn calculate_board_offset() -> Vec2 {
+  vec2(
+    (screen_width() - 8.0 * SQUARE_SIZE) / 2.0,
+    (screen_height() - 8.0 * SQUARE_SIZE) / 2.0,
+  )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Piece {
   color: PieceColor,
@@ -158,6 +165,7 @@ impl Piece {
 
 const WHITE_SQUARE_COLOR: Color = Color::from_hex(0x7C4C3E);
 const DARK_SQUARE_COLOR: Color = Color::from_hex(0x512A2A);
+const HIGHLIGHTED_SQUARE_COLOR: Color = Color::from_rgba(0xF0, 0xC0, 0x40, 128);
 const SQUARE_SIZE: f32 = 100.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,6 +173,7 @@ pub struct Square {
   piece: Option<Piece>,
   file: File,
   rank: Rank,
+  highlighted: bool,
 }
 
 impl Square {
@@ -178,15 +187,23 @@ impl Square {
       DARK_SQUARE_COLOR
     };
 
-    let offset_x = (screen_width() - 8.0 * SQUARE_SIZE) / 2.0;
-    let offset_y = (screen_height() - 8.0 * SQUARE_SIZE) / 2.0;
+    let board_offset = calculate_board_offset();
 
     let square_pos = vec2(
-      offset_x + col as f32 * SQUARE_SIZE,
-      offset_y + row as f32 * SQUARE_SIZE,
+      board_offset.x + col as f32 * SQUARE_SIZE,
+      board_offset.y + row as f32 * SQUARE_SIZE,
     );
 
     draw_rectangle(square_pos.x, square_pos.y, SQUARE_SIZE, SQUARE_SIZE, color);
+    if self.highlighted {
+      draw_rectangle(
+        square_pos.x,
+        square_pos.y,
+        SQUARE_SIZE,
+        SQUARE_SIZE,
+        HIGHLIGHTED_SQUARE_COLOR,
+      );
+    }
     if let Some(piece) = &self.piece {
       piece.render(square_pos, resources);
     }
@@ -208,12 +225,45 @@ impl Board {
         file,
         rank,
         piece: Piece::new_starting(file, rank),
+        highlighted: false,
       }
     });
 
     Self {
       squares,
       turn_color: PieceColor::White,
+    }
+  }
+
+  pub fn handle_click(&mut self) {
+    let mouse_pos = mouse_position();
+    let board_offset = calculate_board_offset();
+    let relative_mouse_pos = vec2(mouse_pos.0 - board_offset.x, mouse_pos.1 - board_offset.y);
+
+    if relative_mouse_pos.x <= 0.0 || relative_mouse_pos.y <= 0.0 {
+      return;
+    }
+
+    let col = ((mouse_pos.0 - board_offset.x) / SQUARE_SIZE) as usize;
+    let row = ((mouse_pos.1 - board_offset.y) / SQUARE_SIZE) as usize;
+
+    if col < 8 && row < 8 {
+      let square_index = row * 8 + col;
+      self.select_square(square_index);
+    }
+  }
+
+  fn select_square(&mut self, square_index: usize) {
+    self
+      .squares
+      .iter_mut()
+      .for_each(|square| square.highlighted = false);
+    let square = &mut self.squares[square_index];
+    if let Some(piece) = square.piece
+      && piece.color == self.turn_color
+    {
+      // self.select_piece(piece);
+      square.highlighted = true;
     }
   }
 }

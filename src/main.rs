@@ -21,13 +21,17 @@ async fn main() -> Result<(), Error> {
   let resources = Resources::new().await?;
   build_textures_atlas();
 
-  let board = Board::new();
+  let mut board = Board::new();
 
   loop {
     clear_background(Color::from_hex(0x303134));
 
     for (i, square) in board.squares.iter().enumerate() {
       square.render(i as i32, &resources);
+    }
+
+    if is_mouse_button_released(MouseButton::Left) {
+      board.handle_click();
     }
 
     if is_key_down(KeyCode::Escape) {
