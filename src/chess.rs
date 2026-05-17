@@ -182,27 +182,27 @@ impl Piece {
   }
 }
 
-const ORTHOGONALS: [(i32, i32); 4] = [(0, -1), (0, 1), (-1, 0), (1, 0)];
-const DIAGONALS: [(i32, i32); 4] = [(-1, 1), (1, -1), (1, 1), (-1, -1)];
-const ALL_DIRECTIONS: [(i32, i32); 8] = [
-  (0, -1),
-  (0, 1),
-  (-1, 0),
-  (1, 0),
-  (-1, 1),
-  (1, -1),
-  (1, 1),
-  (-1, -1),
+const ORTHOGONALS: [Pos; 4] = [Pos(0, -1), Pos(0, 1), Pos(-1, 0), Pos(1, 0)];
+const DIAGONALS: [Pos; 4] = [Pos(-1, 1), Pos(1, -1), Pos(1, 1), Pos(-1, -1)];
+const ALL_DIRECTIONS: [Pos; 8] = [
+  Pos(0, -1),
+  Pos(0, 1),
+  Pos(-1, 0),
+  Pos(1, 0),
+  Pos(-1, 1),
+  Pos(1, -1),
+  Pos(1, 1),
+  Pos(-1, -1),
 ];
-const KNIGHT_JUMPS: [(i32, i32); 8] = [
-  (1, 2),
-  (1, -2),
-  (-1, 2),
-  (-1, -2),
-  (2, 1),
-  (2, -1),
-  (-2, 1),
-  (-2, -1),
+const KNIGHT_JUMPS: [Pos; 8] = [
+  Pos(1, 2),
+  Pos(1, -2),
+  Pos(-1, 2),
+  Pos(-1, -2),
+  Pos(2, 1),
+  Pos(2, -1),
+  Pos(-2, 1),
+  Pos(-2, -1),
 ];
 
 const WHITE_SQUARE_COLOR: Color = Color::from_hex(0x7C4C3E);
@@ -210,6 +210,22 @@ const DARK_SQUARE_COLOR: Color = Color::from_hex(0x512A2A);
 const HIGHLIGHTED_SQUARE_COLOR: Color = Color::from_rgba(0xF0, 0xC0, 0x40, 128);
 const MOVE_AVAILABLE_SQUARE_COLOR: Color = Color::from_rgba(0x5B, 0x8F, 0xA8, 128);
 const SQUARE_SIZE: f32 = 100.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Pos(i32, i32);
+
+impl Pos {
+  fn offset(self, difference: Pos) -> Option<usize> {
+    let nc = self.0 + difference.0;
+    let nr = self.1 + difference.1;
+
+    if nc < 0 || nc > 7 || nr < 0 || nr > 7 {
+      return None;
+    }
+
+    Some((nr * 8 + nc) as usize)
+  }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Square {
@@ -260,6 +276,14 @@ impl Square {
     if let Some(piece) = &self.piece {
       piece.render(square_pos, resources);
     }
+  }
+
+  fn is_empty(&self) -> bool {
+    self.piece.is_none()
+  }
+
+  fn is_enemy(&self, color: PieceColor) -> bool {
+    matches!(self.piece, Some(p) if p.color != color)
   }
 }
 
@@ -351,7 +375,7 @@ impl Board {
   }
 
   fn calculate_available_moves(&mut self, square_index: usize, piece_kind: PieceKind) {
-    let from = (square_index as i32 % 8, square_index as i32 / 8);
+    let from = Pos(square_index as i32 % 8, square_index as i32 / 8);
 
     match piece_kind {
       PieceKind::King => ALL_DIRECTIONS
@@ -367,38 +391,49 @@ impl Board {
     }
   }
 
-  fn mark_available_pawn_moves(&mut self, from: (i32, i32)) {
+  fn mark_available_pawn_moves(&mut self, from: Pos) {
     let (dir, start_row) = match self.turn_color {
       PieceColor::White => (1, 1),
       PieceColor::Black => (-1, 6),
     };
 
-    if let Some(fwd) = Self::offset(from, (0, dir)).filter(|&t| self.is_empty(t)) {
+    if let Some(fwd) = from
+      .offset(Pos(0, dir))
+      .filter(|&t| self.squares[t].is_empty())
+    {
       self.mark_available(fwd);
 
       if from.1 == start_row
-        && let Some(fwd2) = Self::offset(from, (0, dir * 2)).filter(|&t| self.is_empty(t))
+        && let Some(fwd2) = from
+          .offset(Pos(0, dir * 2))
+          .filter(|&t| self.squares[t].is_empty())
       {
         self.mark_available(fwd2);
       }
     }
 
     for dc in [-1i32, 1] {
-      if let Some(target) = Self::offset(from, (dc, dir)).filter(|&t| self.is_enemy(t)) {
+      if let Some(target) = from
+        .offset(Pos(dc, dir))
+        .filter(|&t| self.squares[t].is_enemy(self.turn_color))
+      {
         self.mark_available(target);
       }
     }
   }
 
-  fn mark_available_jump(&mut self, from: (i32, i32), dir: (i32, i32)) {
-    if let Some(to) = Self::offset(from, dir).filter(|&t| self.is_enemy(t)) {
+  fn mark_available_jump(&mut self, from: Pos, dir: Pos) {
+    if let Some(to) = from
+      .offset(dir)
+      .filter(|&t| self.squares[t].is_enemy(self.turn_color))
+    {
       self.mark_available(to);
     }
   }
 
-  fn slide(&mut self, from: (i32, i32), dir: (i32, i32)) {
+  fn slide(&mut self, from: Pos, dir: Pos) {
     for k in 1..8i32 {
-      let Some(to) = Self::offset(from, (dir.0 * k, dir.1 * k)) else {
+      let Some(to) = from.offset(Pos(dir.0 * k, dir.1 * k)) else {
         break;
       };
 
@@ -415,24 +450,5 @@ impl Board {
 
   fn mark_available(&mut self, to: usize) {
     self.squares[to].move_available = true;
-  }
-
-  fn is_empty(&self, to: usize) -> bool {
-    self.squares[to].piece.is_none()
-  }
-
-  fn is_enemy(&self, to: usize) -> bool {
-    matches!(self.squares[to].piece, Some(p) if p.color != self.turn_color)
-  }
-
-  fn offset((col, row): (i32, i32), (dc, dr): (i32, i32)) -> Option<usize> {
-    let nc = col + dc;
-    let nr = row + dr;
-
-    if nc < 0 || nc > 7 || nr < 0 || nr > 7 {
-      return None;
-    }
-
-    Some((nr * 8 + nc) as usize)
   }
 }
