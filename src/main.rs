@@ -30,6 +30,8 @@ async fn main() -> Result<(), Error> {
       square.render(i as i32, &resources);
     }
 
+    board.draw_info();
+
     if is_mouse_button_released(MouseButton::Left) {
       board.handle_click();
     }

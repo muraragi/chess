@@ -1,4 +1,4 @@
-use std::array::from_fn;
+use std::{array::from_fn, fmt::Display, ops::Not};
 
 use macroquad::prelude::*;
 
@@ -32,6 +32,25 @@ pub enum Rank {
 pub enum PieceColor {
   White,
   Black,
+}
+
+impl Not for PieceColor {
+  type Output = Self;
+  fn not(self) -> Self::Output {
+    match self {
+      PieceColor::White => PieceColor::Black,
+      PieceColor::Black => PieceColor::White,
+    }
+  }
+}
+
+impl Display for PieceColor {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      PieceColor::White => write!(f, "White"),
+      PieceColor::Black => write!(f, "Black"),
+    }
+  }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,9 +182,33 @@ impl Piece {
   }
 }
 
+const ORTHOGONALS: [(i32, i32); 4] = [(0, -1), (0, 1), (-1, 0), (1, 0)];
+const DIAGONALS: [(i32, i32); 4] = [(-1, 1), (1, -1), (1, 1), (-1, -1)];
+const ALL_DIRECTIONS: [(i32, i32); 8] = [
+  (0, -1),
+  (0, 1),
+  (-1, 0),
+  (1, 0),
+  (-1, 1),
+  (1, -1),
+  (1, 1),
+  (-1, -1),
+];
+const KNIGHT_JUMPS: [(i32, i32); 8] = [
+  (1, 2),
+  (1, -2),
+  (-1, 2),
+  (-1, -2),
+  (2, 1),
+  (2, -1),
+  (-2, 1),
+  (-2, -1),
+];
+
 const WHITE_SQUARE_COLOR: Color = Color::from_hex(0x7C4C3E);
 const DARK_SQUARE_COLOR: Color = Color::from_hex(0x512A2A);
 const HIGHLIGHTED_SQUARE_COLOR: Color = Color::from_rgba(0xF0, 0xC0, 0x40, 128);
+const MOVE_AVAILABLE_SQUARE_COLOR: Color = Color::from_rgba(0x5B, 0x8F, 0xA8, 128);
 const SQUARE_SIZE: f32 = 100.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,7 +216,8 @@ pub struct Square {
   piece: Option<Piece>,
   file: File,
   rank: Rank,
-  highlighted: bool,
+  selected: bool,
+  move_available: bool,
 }
 
 impl Square {
@@ -195,13 +239,22 @@ impl Square {
     );
 
     draw_rectangle(square_pos.x, square_pos.y, SQUARE_SIZE, SQUARE_SIZE, color);
-    if self.highlighted {
+    if self.selected {
       draw_rectangle(
         square_pos.x,
         square_pos.y,
         SQUARE_SIZE,
         SQUARE_SIZE,
         HIGHLIGHTED_SQUARE_COLOR,
+      );
+    }
+    if self.move_available {
+      draw_rectangle(
+        square_pos.x,
+        square_pos.y,
+        SQUARE_SIZE,
+        SQUARE_SIZE,
+        MOVE_AVAILABLE_SQUARE_COLOR,
       );
     }
     if let Some(piece) = &self.piece {
@@ -213,6 +266,7 @@ impl Square {
 pub struct Board {
   pub squares: [Square; 64],
   pub turn_color: PieceColor,
+  pub is_move_mode: bool,
 }
 
 impl Board {
@@ -225,14 +279,21 @@ impl Board {
         file,
         rank,
         piece: Piece::new_starting(file, rank),
-        highlighted: false,
+        selected: false,
+        move_available: false,
       }
     });
 
     Self {
       squares,
       turn_color: PieceColor::White,
+      is_move_mode: false,
     }
+  }
+
+  pub fn draw_info(&self) {
+    let current_turn = format!("Current turn - {}", self.turn_color);
+    draw_text(&current_turn, 16.0, 32.0, 32.0, WHITE);
   }
 
   pub fn handle_click(&mut self) {
@@ -254,16 +315,124 @@ impl Board {
   }
 
   fn select_square(&mut self, square_index: usize) {
-    self
-      .squares
-      .iter_mut()
-      .for_each(|square| square.highlighted = false);
+    if self.is_move_mode {
+      if let Some(prev_index) = self.squares.iter().position(|s| s.selected)
+        && self.squares[square_index].move_available
+      {
+        let prev_piece = self.squares[prev_index].piece;
+        self.squares[square_index].piece = prev_piece;
+        self.squares[prev_index].piece = None;
+        self.switch_turn();
+      }
 
-    let square = &mut self.squares[square_index];
-    if let Some(piece) = square.piece
-      && piece.color == self.turn_color
-    {
-      square.highlighted = true;
+      self.is_move_mode = false;
+      self.clear_selections();
+    } else {
+      if let Some(piece) = self.squares[square_index].piece
+        && piece.color == self.turn_color
+      {
+        self.clear_selections();
+        self.is_move_mode = true;
+        self.squares[square_index].selected = true;
+        self.calculate_available_moves(square_index, piece.kind);
+      }
     }
+  }
+
+  fn clear_selections(&mut self) {
+    self.squares.iter_mut().for_each(|square| {
+      square.selected = false;
+      square.move_available = false;
+    });
+  }
+
+  fn switch_turn(&mut self) {
+    self.turn_color = !self.turn_color;
+  }
+
+  fn calculate_available_moves(&mut self, square_index: usize, piece_kind: PieceKind) {
+    let from = (square_index as i32 % 8, square_index as i32 / 8);
+
+    match piece_kind {
+      PieceKind::King => ALL_DIRECTIONS
+        .iter()
+        .for_each(|&d| self.mark_available_jump(from, d)),
+      PieceKind::Knight => KNIGHT_JUMPS
+        .iter()
+        .for_each(|&d| self.mark_available_jump(from, d)),
+      PieceKind::Queen => ALL_DIRECTIONS.iter().for_each(|&d| self.slide(from, d)),
+      PieceKind::Rook => ORTHOGONALS.iter().for_each(|&d| self.slide(from, d)),
+      PieceKind::Bishop => DIAGONALS.iter().for_each(|&d| self.slide(from, d)),
+      PieceKind::Pawn => self.mark_available_pawn_moves(from),
+    }
+  }
+
+  fn mark_available_pawn_moves(&mut self, from: (i32, i32)) {
+    let (dir, start_row) = match self.turn_color {
+      PieceColor::White => (1, 1),
+      PieceColor::Black => (-1, 6),
+    };
+
+    if let Some(fwd) = Self::offset(from, (0, dir)).filter(|&t| self.is_empty(t)) {
+      self.mark_available(fwd);
+
+      if from.1 == start_row
+        && let Some(fwd2) = Self::offset(from, (0, dir * 2)).filter(|&t| self.is_empty(t))
+      {
+        self.mark_available(fwd2);
+      }
+    }
+
+    for dc in [-1i32, 1] {
+      if let Some(target) = Self::offset(from, (dc, dir)).filter(|&t| self.is_enemy(t)) {
+        self.mark_available(target);
+      }
+    }
+  }
+
+  fn mark_available_jump(&mut self, from: (i32, i32), dir: (i32, i32)) {
+    if let Some(to) = Self::offset(from, dir).filter(|&t| self.is_enemy(t)) {
+      self.mark_available(to);
+    }
+  }
+
+  fn slide(&mut self, from: (i32, i32), dir: (i32, i32)) {
+    for k in 1..8i32 {
+      let Some(to) = Self::offset(from, (dir.0 * k, dir.1 * k)) else {
+        break;
+      };
+
+      match self.squares[to].piece {
+        Some(p) if p.color == self.turn_color => break,
+        Some(_) => {
+          self.mark_available(to);
+          break;
+        }
+        None => self.mark_available(to),
+      }
+    }
+  }
+
+  fn mark_available(&mut self, to: usize) {
+    self.squares[to].move_available = true;
+  }
+
+  fn is_empty(&self, to: usize) -> bool {
+    self.squares[to].piece.is_none()
+  }
+
+  fn is_enemy(&self, to: usize) -> bool {
+    matches!(self.squares[to].piece, Some(p) if p.color != self.turn_color)
+  }
+
+  fn offset((col, row): (i32, i32), (dc, dr): (i32, i32)) -> Option<usize> {
+    let nc = col + dc;
+    let nr = row + dr;
+
+    if nc < 0 || nc > 7 || nr < 0 || nr > 7 {
+      return None;
+    }
+
+    Some((nr * 8 + nc) as usize)
   }
 }
