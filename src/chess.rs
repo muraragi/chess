@@ -97,6 +97,7 @@ struct Piece {
   color: PieceColor,
   kind: PieceKind,
   value: i32,
+  has_moved: bool,
 }
 
 const PIECE_SPRITE_SIZE: f32 = 80.0;
@@ -112,7 +113,12 @@ impl Piece {
       PieceKind::Pawn => 1,
     };
 
-    Self { color, kind, value }
+    Self {
+      color,
+      kind,
+      value,
+      has_moved: false,
+    }
   }
 
   pub fn new_starting(file: File, rank: Rank) -> Option<Self> {
@@ -287,6 +293,157 @@ impl Square {
   }
 }
 
+fn is_square_attacked(squares: &[Square; 64], target_idx: usize, by: PieceColor) -> bool {
+  let target = Pos(target_idx as i32 % 8, target_idx as i32 / 8);
+
+  let any_at = |offsets: &[Pos], kind: PieceKind| {
+    offsets.iter().any(|&d| {
+      target
+        .offset(d)
+        .is_some_and(|idx| matches!(squares[idx].piece, Some(p) if p.color == by && p.kind == kind))
+    })
+  };
+
+  let any_ray = |dirs: &[Pos], k1: PieceKind, k2: PieceKind| {
+    dirs.iter().any(|&dir| {
+      for k in 1..8i32 {
+        let Some(idx) = target.offset(Pos(dir.0 * k, dir.1 * k)) else {
+          return false;
+        };
+        match squares[idx].piece {
+          None => continue,
+          Some(p) if p.color == by && (p.kind == k1 || p.kind == k2) => return true,
+          Some(_) => return false,
+        }
+      }
+      false
+    })
+  };
+
+  let pawn_dir = match by {
+    PieceColor::White => 1,
+    PieceColor::Black => -1,
+  };
+  let pawn_offsets = [Pos(-1, -pawn_dir), Pos(1, -pawn_dir)];
+
+  any_at(&KNIGHT_JUMPS, PieceKind::Knight)
+    || any_at(&ALL_DIRECTIONS, PieceKind::King)
+    || any_at(&pawn_offsets, PieceKind::Pawn)
+    || any_ray(&ORTHOGONALS, PieceKind::Rook, PieceKind::Queen)
+    || any_ray(&DIAGONALS, PieceKind::Bishop, PieceKind::Queen)
+}
+
+fn push_jump(
+  squares: &[Square; 64],
+  from: Pos,
+  dir: Pos,
+  color: PieceColor,
+  out: &mut Vec<usize>,
+) {
+  if let Some(to) = from
+    .offset(dir)
+    .filter(|&t| squares[t].is_empty() || squares[t].is_enemy(color))
+  {
+    out.push(to);
+  }
+}
+
+fn push_slide(
+  squares: &[Square; 64],
+  from: Pos,
+  dir: Pos,
+  color: PieceColor,
+  out: &mut Vec<usize>,
+) {
+  for k in 1..8i32 {
+    let Some(to) = from.offset(Pos(dir.0 * k, dir.1 * k)) else {
+      break;
+    };
+    match squares[to].piece {
+      Some(p) if p.color == color => break,
+      Some(_) => {
+        out.push(to);
+        break;
+      }
+      None => out.push(to),
+    }
+  }
+}
+
+fn push_pawn(squares: &[Square; 64], from: Pos, color: PieceColor, out: &mut Vec<usize>) {
+  let (dir, start_row) = match color {
+    PieceColor::White => (1, 1),
+    PieceColor::Black => (-1, 6),
+  };
+
+  if let Some(fwd) = from
+    .offset(Pos(0, dir))
+    .filter(|&t| squares[t].is_empty())
+  {
+    out.push(fwd);
+
+    if from.1 == start_row
+      && let Some(fwd2) = from
+        .offset(Pos(0, dir * 2))
+        .filter(|&t| squares[t].is_empty())
+    {
+      out.push(fwd2);
+    }
+  }
+
+  for dc in [-1i32, 1] {
+    if let Some(target) = from
+      .offset(Pos(dc, dir))
+      .filter(|&t| squares[t].is_enemy(color))
+    {
+      out.push(target);
+    }
+  }
+}
+
+fn push_castling(squares: &[Square; 64], from: Pos, color: PieceColor, out: &mut Vec<usize>) {
+  let row: i32 = match color {
+    PieceColor::White => 0,
+    PieceColor::Black => 7,
+  };
+
+  if from != Pos(4, row) {
+    return;
+  }
+  let king_idx = (row * 8 + 4) as usize;
+  let Some(king) = squares[king_idx].piece else {
+    return;
+  };
+  if king.has_moved || is_square_attacked(squares, king_idx, !color) {
+    return;
+  }
+
+  let try_side =
+    |out: &mut Vec<usize>, rook_col: i32, empty_cols: &[i32], pass_cols: &[i32], dest_col: i32| {
+      let rook_idx = (row * 8 + rook_col) as usize;
+      let Some(rook) = squares[rook_idx].piece else {
+        return;
+      };
+      if rook.kind != PieceKind::Rook || rook.color != color || rook.has_moved {
+        return;
+      }
+      for &c in empty_cols {
+        if !squares[(row * 8 + c) as usize].is_empty() {
+          return;
+        }
+      }
+      for &c in pass_cols {
+        if is_square_attacked(squares, (row * 8 + c) as usize, !color) {
+          return;
+        }
+      }
+      out.push((row * 8 + dest_col) as usize);
+    };
+
+  try_side(out, 7, &[5, 6], &[5, 6], 6);
+  try_side(out, 0, &[1, 2, 3], &[2, 3], 2);
+}
+
 pub struct Board {
   pub squares: [Square; 64],
   pub turn_color: PieceColor,
@@ -343,9 +500,7 @@ impl Board {
       if let Some(prev_index) = self.squares.iter().position(|s| s.selected)
         && self.squares[square_index].move_available
       {
-        let prev_piece = self.squares[prev_index].piece;
-        self.squares[square_index].piece = prev_piece;
-        self.squares[prev_index].piece = None;
+        self.apply_move(prev_index, square_index);
         self.switch_turn();
       }
 
@@ -376,75 +531,93 @@ impl Board {
 
   fn calculate_available_moves(&mut self, square_index: usize, piece_kind: PieceKind) {
     let from = Pos(square_index as i32 % 8, square_index as i32 / 8);
+    let color = self.turn_color;
+    let mut candidates: Vec<usize> = Vec::new();
 
     match piece_kind {
-      PieceKind::King => ALL_DIRECTIONS
-        .iter()
-        .for_each(|&d| self.mark_available_jump(from, d)),
-      PieceKind::Knight => KNIGHT_JUMPS
-        .iter()
-        .for_each(|&d| self.mark_available_jump(from, d)),
-      PieceKind::Queen => ALL_DIRECTIONS.iter().for_each(|&d| self.slide(from, d)),
-      PieceKind::Rook => ORTHOGONALS.iter().for_each(|&d| self.slide(from, d)),
-      PieceKind::Bishop => DIAGONALS.iter().for_each(|&d| self.slide(from, d)),
-      PieceKind::Pawn => self.mark_available_pawn_moves(from),
+      PieceKind::King => {
+        for &d in ALL_DIRECTIONS.iter() {
+          push_jump(&self.squares, from, d, color, &mut candidates);
+        }
+        push_castling(&self.squares, from, color, &mut candidates);
+      }
+      PieceKind::Knight => {
+        for &d in KNIGHT_JUMPS.iter() {
+          push_jump(&self.squares, from, d, color, &mut candidates);
+        }
+      }
+      PieceKind::Queen => {
+        for &d in ALL_DIRECTIONS.iter() {
+          push_slide(&self.squares, from, d, color, &mut candidates);
+        }
+      }
+      PieceKind::Rook => {
+        for &d in ORTHOGONALS.iter() {
+          push_slide(&self.squares, from, d, color, &mut candidates);
+        }
+      }
+      PieceKind::Bishop => {
+        for &d in DIAGONALS.iter() {
+          push_slide(&self.squares, from, d, color, &mut candidates);
+        }
+      }
+      PieceKind::Pawn => push_pawn(&self.squares, from, color, &mut candidates),
+    }
+
+    for to in candidates {
+      if self.is_move_legal(square_index, to) {
+        self.mark_available(to);
+      }
     }
   }
 
-  fn mark_available_pawn_moves(&mut self, from: Pos) {
-    let (dir, start_row) = match self.turn_color {
-      PieceColor::White => (1, 1),
-      PieceColor::Black => (-1, 6),
+  fn is_move_legal(&self, from: usize, to: usize) -> bool {
+    let Some(piece) = self.squares[from].piece else {
+      return false;
     };
 
-    if let Some(fwd) = from
-      .offset(Pos(0, dir))
-      .filter(|&t| self.squares[t].is_empty())
-    {
-      self.mark_available(fwd);
+    let mut sim = self.squares;
+    sim[to].piece = Some(piece);
+    sim[from].piece = None;
 
-      if from.1 == start_row
-        && let Some(fwd2) = from
-          .offset(Pos(0, dir * 2))
-          .filter(|&t| self.squares[t].is_empty())
-      {
-        self.mark_available(fwd2);
-      }
-    }
+    let color = piece.color;
+    let Some(king_idx) = sim
+      .iter()
+      .position(|s| matches!(s.piece, Some(p) if p.color == color && p.kind == PieceKind::King))
+    else {
+      return true;
+    };
 
-    for dc in [-1i32, 1] {
-      if let Some(target) = from
-        .offset(Pos(dc, dir))
-        .filter(|&t| self.squares[t].is_enemy(self.turn_color))
-      {
-        self.mark_available(target);
-      }
-    }
+    !is_square_attacked(&sim, king_idx, !color)
   }
 
-  fn mark_available_jump(&mut self, from: Pos, dir: Pos) {
-    if let Some(to) = from
-      .offset(dir)
-      .filter(|&t| self.squares[t].is_enemy(self.turn_color))
-    {
-      self.mark_available(to);
+  fn apply_move(&mut self, from: usize, to: usize) {
+    let mut piece = self.squares[from].piece;
+    if let Some(p) = piece.as_mut() {
+      p.has_moved = true;
     }
-  }
+    self.squares[to].piece = piece;
+    self.squares[from].piece = None;
 
-  fn slide(&mut self, from: Pos, dir: Pos) {
-    for k in 1..8i32 {
-      let Some(to) = from.offset(Pos(dir.0 * k, dir.1 * k)) else {
-        break;
+    if let Some(p) = piece
+      && p.kind == PieceKind::King
+    {
+      let from_col = (from % 8) as i32;
+      let to_col = (to % 8) as i32;
+      let row = from / 8;
+      let (rook_from_col, rook_to_col) = match to_col - from_col {
+        2 => (7usize, 5usize),
+        -2 => (0usize, 3usize),
+        _ => return,
       };
-
-      match self.squares[to].piece {
-        Some(p) if p.color == self.turn_color => break,
-        Some(_) => {
-          self.mark_available(to);
-          break;
-        }
-        None => self.mark_available(to),
+      let rook_from = row * 8 + rook_from_col;
+      let rook_to = row * 8 + rook_to_col;
+      let mut rook = self.squares[rook_from].piece;
+      if let Some(r) = rook.as_mut() {
+        r.has_moved = true;
       }
+      self.squares[rook_to].piece = rook;
+      self.squares[rook_from].piece = None;
     }
   }
 
