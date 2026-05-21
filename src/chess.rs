@@ -188,7 +188,7 @@ fn calculate_board_offset() -> Vec2 {
 
 #[derive(Clone)]
 pub struct Board {
-  pub pieces: Vec<Piece>,
+  pieces: Vec<Piece>,
   pub turn_color: PieceColor,
   pub is_move_mode: bool,
 }
