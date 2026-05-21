@@ -22,14 +22,12 @@ async fn main() -> Result<(), Error> {
   build_textures_atlas();
 
   let mut board = Board::new();
+  board.generate_piece_moves();
 
   loop {
     clear_background(Color::from_hex(0x303134));
 
-    for (i, square) in board.squares.iter().enumerate() {
-      square.render(i as i32, &resources);
-    }
-
+    board.render(&resources);
     board.draw_info();
 
     if is_mouse_button_released(MouseButton::Left) {
