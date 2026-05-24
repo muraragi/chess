@@ -2,7 +2,7 @@ use macroquad::{Error, prelude::*};
 
 use crate::chess::Board;
 use crate::resources::Resources;
-use crate::ui::{MenuAction, UI};
+use crate::ui::{GameOverAction, MenuAction, UI};
 
 mod chess;
 mod resources;
@@ -51,12 +51,23 @@ async fn main() -> Result<(), Error> {
         board.render(&resources);
         board.draw_info();
 
-        if is_mouse_button_released(MouseButton::Left) {
-          board.handle_click();
-        }
+        if board.is_game_over {
+          match ui.render_game_over(!board.turn_color) {
+            GameOverAction::NewGame => {
+              board = Board::new();
+              state = GameState::Chess;
+            }
+            GameOverAction::BackToMenu => state = GameState::Menu,
+            GameOverAction::None => {}
+          }
+        } else {
+          if is_mouse_button_released(MouseButton::Left) {
+            board.handle_click();
+          }
 
-        if is_key_pressed(KeyCode::Escape) {
-          state = GameState::Menu;
+          if is_key_pressed(KeyCode::Escape) {
+            state = GameState::Menu;
+          }
         }
       }
     }

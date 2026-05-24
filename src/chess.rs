@@ -191,6 +191,7 @@ pub struct Board {
   pieces: Vec<Piece>,
   pub turn_color: PieceColor,
   pub is_move_mode: bool,
+  pub is_game_over: bool,
 }
 
 impl Board {
@@ -234,6 +235,7 @@ impl Board {
       pieces,
       turn_color: PieceColor::White,
       is_move_mode: false,
+      is_game_over: false,
     };
 
     board.generate_piece_moves();
@@ -327,6 +329,7 @@ impl Board {
       self.switch_turn();
       self.clear_selection();
       self.generate_piece_moves();
+      self.check_outcome();
     } else if let Some(clicked) = self.piece_at_mut(pos)
       && clicked.color == turn_color
     {
@@ -364,6 +367,14 @@ impl Board {
     for piece in &mut self.pieces {
       piece.selected = false
     }
+  }
+
+  fn check_outcome(&mut self) {
+    self.is_game_over = !self
+      .pieces
+      .iter()
+      .filter(|piece| piece.color == self.turn_color)
+      .any(|piece| piece.moves.len() != 0);
   }
 
   fn generate_pseudo_moves_for_piece(
