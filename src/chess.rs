@@ -230,11 +230,18 @@ impl Board {
       ));
     }
 
-    Self {
+    let mut board = Self {
       pieces,
       turn_color: PieceColor::White,
       is_move_mode: false,
-    }
+    };
+
+    board.generate_piece_moves();
+    board
+  }
+
+  pub fn game_started(&self) -> bool {
+    self.pieces.iter().any(|piece| piece.has_moved)
   }
 
   pub fn render(&self, resources: &Resources) {
