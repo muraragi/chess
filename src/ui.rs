@@ -74,7 +74,7 @@ impl UI {
     let mut action = MenuAction::None;
 
     root_ui().window(hash!(), vec2(0.0, 0.0), screen, |ui| {
-      ui.label(Vec2::new(15.0, 0.0), "CHESS");
+      ui.label(Vec2::new(16.0, 8.0), "CHESS");
       if can_continue && self.menu_button(ui, "CONTINUE", screen, 0) {
         action = MenuAction::Continue;
       }
