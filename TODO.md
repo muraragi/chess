@@ -1,5 +1,5 @@
 [x] Castling
-[] Check/Mate handling
-[] Menu
+[x] Check/Mate handling
+[x] Menu
 [] FEN generation
 [] Bot implementation
